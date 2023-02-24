@@ -1,0 +1,203 @@
+local Xen = {functions = {}}
+
+local Vector2New, Cam, Mouse, client, find, Draw, Inset, players, RunService, UIS=
+    Vector2.new,
+    workspace.CurrentCamera,
+    game.Players.LocalPlayer:GetMouse(),
+    game.Players.LocalPlayer,
+    table.find,
+    Drawing.new,
+    game:GetService("GuiService"):GetGuiInset().Y,
+    game.Players, 
+    game.RunService,
+    game:GetService("UserInputService")
+
+
+local mf, rnew = math.floor, Random.new
+
+local Targetting
+local lockedCamTo
+
+local Circle = Draw("Circle")
+Circle.Thickness = 1
+Circle.Transparency = 0.7
+Circle.Color = Color3.new(1,1,1)
+
+Xen.functions.update_FOVs = function ()
+    if not (Circle) then
+        return Circle
+    end
+    Circle.Radius =  getgenv().Xen.SilentAim.FOVData.Radius * 3
+    Circle.Visible = getgenv().Xen.SilentAim.FOVData.Visibility
+    Circle.Filled = getgenv().Xen.SilentAim.FOVData.Filled
+    Circle.Position = Vector2New(Mouse.X, Mouse.Y + (Inset))
+    return Circle
+end
+
+Xen.functions.onKeyPress = function(inputObject)
+    if inputObject.KeyCode == Enum.KeyCode[getgenv().Xen.SilentAim.Key:upper()] then
+        getgenv().Xen.SilentAim.Enabled = not getgenv().Xen.SilentAim.Enabled
+    end
+
+    if inputObject.KeyCode == Enum.KeyCode[getgenv().Xen.Tracing.Key:upper()] then
+        getgenv().Xen.Tracing.Enabled = not getgenv().Xen.Tracing.Enabled
+        if getgenv().Xen.Tracing.Enabled then
+            lockedCamTo = Xen.functions.returnClosestPlayer(getgenv().Xen.SilentAim.ChanceData.Chance)
+        end
+    end
+end
+
+UIS.InputBegan:Connect(Xen.functions.onKeyPress)
+
+
+Xen.functions.wallCheck = function(direction, ignoreList)
+    if not getgenv().Xen.SilentAim.AimingData.CheckWalls then
+        return true
+    end
+
+    local ray = Ray.new(Cam.CFrame.p, direction - Cam.CFrame.p)
+    local part, _, _ = game:GetService("Workspace"):FindPartOnRayWithIgnoreList(ray, ignoreList)
+
+    return not part
+end
+
+Xen.functions.pointDistance = function(part)
+    local OnScreen = Cam.WorldToScreenPoint(Cam, part.Position)
+    if OnScreen then
+        return (Vector2New(OnScreen.X, OnScreen.Y) - Vector2New(Mouse.X, Mouse.Y)).Magnitude
+    end
+end
+
+Xen.functions.returnClosestPart = function(Character)
+    local data = {
+        dist = math.huge,
+        part = nil,
+        filteredparts = {},
+        classes = {"Part", "BasePart", "MeshPart"}
+    }
+
+    if not (Character and Character:IsA("Model")) then
+        return data.part
+    end
+    local children = Character:GetChildren()
+    for _, child in pairs(children) do
+        if table.find(data.classes, child.ClassName) then
+            table.insert(data.filteredparts, child)
+            for _, part in pairs(data.filteredparts) do
+                local dist = Xen.functions.pointDistance(part)
+                if Circle.Radius > dist and dist < data.dist then
+                    data.part = part
+                    data.dist = dist
+                end
+            end
+        end
+    end
+    return data.part
+end
+
+Xen.functions.returnClosestPlayer = function (amount)
+    local data = {
+        dist = 1/0,
+        player = nil
+    }
+
+    amount = amount or nil
+
+    for _, player in pairs(players:GetPlayers()) do
+        if (player.Character and player ~= client) then
+            local dist = Xen.functions.pointDistance(player.Character.HumanoidRootPart)
+            if Circle.Radius > dist and dist < data.dist and 
+            Xen.functions.wallCheck(player.Character.Head.Position,{client, player.Character}) then
+                data.dist = dist
+                data.player = player
+            end
+        end
+    end
+    local calc = mf(rnew().NextNumber(rnew(), 0, 1) * 100) / 100
+    local use = getgenv().Xen.SilentAim.ChanceData.UseChance
+    if use and calc <= mf(amount) / 100 then
+        return calc and data.player
+    else
+        return data.player
+    end
+end
+
+Xen.functions.setAimingType = function (player, type)
+    local previousSilentAimPart = getgenv().Xen.SilentAim.AimPart
+    local previousTracingPart = getgenv().Xen.Tracing.AimPart
+    if type == "Closest Part" then
+        getgenv().Xen.SilentAim.AimPart = tostring(Xen.functions.returnClosestPart(player.Character))
+        getgenv().Xen.Tracing.AimPart = tostring(Xen.functions.returnClosestPart(player.Character))
+    elseif type == "Closest Point" then
+        Xen.functions.returnClosestPoint()
+    elseif type == "Default" then
+        getgenv().Xen.SilentAim.AimPart = previousSilentAimPart
+        getgenv().Xen.Tracing.AimPart = previousTracingPart
+    else
+        getgenv().Xen.SilentAim.AimPart = previousSilentAimPart
+        getgenv().Xen.Tracing.AimPart = previousTracingPart
+    end
+end
+
+Xen.functions.aimingCheck = function (player)
+    if getgenv().Xen.SilentAim.AimingData.CheckKnocked == true and player and player.Character then
+        if player.Character.BodyEffects["K.O"].Value then
+            return true
+        end
+    end
+    if getgenv().Xen.SilentAim.AimingData.CheckGrabbed == true and player and player.Character then
+        if player.Character:FindFirstChild("GRABBING_CONSTRAINT") then
+            return true
+        end
+    end
+    return false
+end
+
+
+local lastRender = 0
+local interpolation = 0.01
+
+RunService.RenderStepped:Connect(function(delta)
+    local valueTypes = 1.375
+    lastRender = lastRender + delta
+    while lastRender > interpolation do
+        lastRender = lastRender - interpolation
+    end
+    if getgenv().Xen.Tracing.Enabled and lockedCamTo ~= nil and getgenv().Xen.Tracing.TracingOptions.Strength == "Hard" then
+        local Vel =  lockedCamTo.Character[getgenv().Xen.Tracing.AimPart].Velocity / (getgenv().Xen.Tracing.Prediction * valueTypes)
+        local Main = CFrame.new(Cam.CFrame.p, lockedCamTo.Character[getgenv().Xen.Tracing.AimPart].Position + (Vel))
+        Cam.CFrame = Cam.CFrame:Lerp(Main ,getgenv().Xen.Tracing.TracingOptions.Smoothness , Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        Xen.functions.setAimingType(lockedCamTo, getgenv().Xen.Tracing.TracingOptions.AimingType)
+    elseif getgenv().Xen.Tracing.Enabled and lockedCamTo ~= nil and getgenv().Xen.Tracing.TracingOptions.Strength == "Soft" then
+        local Vel =  lockedCamTo.Character[getgenv().Xen.Tracing.AimPart].Velocity / (getgenv().Xen.Tracing.Prediction / valueTypes)
+        local Main = CFrame.new(Cam.CFrame.p, lockedCamTo.Character[getgenv().Xen.Tracing.AimPart].Position + (Vel))
+        Cam.CFrame = Cam.CFrame:Lerp(Main ,getgenv().Xen.Tracing.TracingOptions.Smoothness , Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        Xen.functions.setAimingType(lockedCamTo, getgenv().Xen.Tracing.TracingOptions.AimingType)
+    else
+
+    end
+end)
+
+task.spawn(function ()
+    while task.wait() do
+        if Targetting then
+            Xen.functions.setAimingType(Targetting, getgenv().Xen.SilentAim.AimingType)
+        end
+        Xen.functions.update_FOVs()
+    end
+end)
+
+
+local __index
+__index = hookmetamethod(game,"__index", function(Obj, Property)
+    if Obj:IsA("Mouse") and Property == "Hit" then
+        Targetting = Xen.functions.returnClosestPlayer(getgenv().Xen.SilentAim.ChanceData.Chance)
+        if Targetting ~= nil and getgenv().Xen.SilentAim.Enabled and not Xen.functions.aimingCheck(Targetting) then
+            local currentvelocity = Targetting.Character[getgenv().Xen.SilentAim.AimPart].Velocity
+            local currentposition = Targetting.Character[getgenv().Xen.SilentAim.AimPart].CFrame
+
+            return currentposition + (currentvelocity * getgenv().Xen.SilentAim.Prediction)
+        end
+    end
+    return __index(Obj, Property)
+end)
